@@ -12,7 +12,7 @@ All standard USD Types and keywords.
 
 USD navigation via `usdresolve`
 
-USDC (binary) support via `usdcat`
+USDC (binary) support via `usdcat`. Opening a `.usdc` file from the explorer now shows a USDA preview. You can also use **USD: Open as USDA** from the explorer or editor tab context menu (works for `.usdc` and binary crate `.usd` files).
 
 ![ScreenShot](images/kitchenset_navication.gif)
 

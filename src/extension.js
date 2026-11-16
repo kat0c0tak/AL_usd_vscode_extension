@@ -38,7 +38,7 @@ async function resolveAsset(inputPath, anchorPath) {
     if (result.length > 0) {
       var uri = vscode.Uri.file(result);
       if (await isUsdcFile(result)) {
-        uri.scheme = "usdc" ;
+        uri = uri.with({ scheme: "usdc" });
       }
       return uri
     }
@@ -52,12 +52,21 @@ async function resolveAsset(inputPath, anchorPath) {
 async function catUsdFile(inputPath) {
   const template = vscode.workspace.getConfiguration().get('usd.cat');
   const command = template.replace("{inputPath}", inputPath);
-  const { stdout, stderr } = await exec(command, { maxBuffer: maxUsdFileSize });
-  const result = stdout.trim(); // Trim new line characters.
-  if (result.length > 0) {
-    return result;
+  try {
+    const { stdout, stderr } = await exec(command, { maxBuffer: maxUsdFileSize });
+    const result = stdout.trim(); // Trim new line characters.
+    if (result.length > 0) {
+      return result;
+    }
+    return null;
   }
-  return null;
+  catch (err) {
+    const message = err && err.message ? err.message : String(err);
+    vscode.window.showErrorMessage(
+      'Failed to convert "' + inputPath + '" with usdcat. If usdcat is not on your PATH, set the `usd.cat` setting to the full path of the usdcat executable (on Windows this may be usdcat.cmd). ' + message
+    );
+    throw err;
+  }
 }
 
 function getAssets(document, lineNum) {
@@ -217,11 +226,55 @@ class TextDocumentContentProvider {
   }
 };
 
+async function openAsUsda(uri) {
+  uri = uri || (vscode.window.activeTextEditor && vscode.window.activeTextEditor.document && vscode.window.activeTextEditor.document.uri);
+  if (!uri) {
+    vscode.window.showErrorMessage('No USD file selected to open as USDA.');
+    return;
+  }
+  // usdc: URIs are already virtual USDA text documents; opening them again would be a no-op.
+  const previewUri = uri.scheme === 'usdc' ? uri : uri.with({ scheme: 'usdc' });
+  try {
+    const doc = await vscode.workspace.openTextDocument(previewUri);
+    await vscode.languages.setTextDocumentLanguage(doc, 'usd');
+    await vscode.window.showTextDocument(doc, { preview: false });
+  }
+  catch (err) {
+    const message = err && err.message ? err.message : String(err);
+    vscode.window.showErrorMessage(
+      'Failed to open "' + (uri.fsPath || previewUri.toString()) + '" as USDA. If usdcat is not on your PATH, set the `usd.cat` setting to the full path of the usdcat executable (on Windows this may be usdcat.cmd). ' + message
+    );
+  }
+}
+
+// Explorer double-click on *.usdc opens this custom editor; we immediately
+// redirect to the usdc: virtual text document and close the empty webview.
+// usdc: documents are handled by TextDocumentContentProvider / the text
+// editor, not this provider, so this should not loop. The scheme check is
+// an extra guard in case a usdc: URI is ever routed here.
+class UsdcRedirectEditor {
+  openCustomDocument(uri) {
+    return { uri: uri, dispose() {} };
+  }
+  async resolveCustomEditor(document, webviewPanel) {
+    try {
+      if (document.uri && document.uri.scheme !== 'usdc') {
+        await vscode.commands.executeCommand('usd.openAsUsda', document.uri);
+      }
+    }
+    finally {
+      webviewPanel.dispose();
+    }
+  }
+}
+
 async function activate(context) {
   context.subscriptions.push(vscode.languages.registerHoverProvider('usd', new HoverProvider()));
   context.subscriptions.push(vscode.languages.registerDefinitionProvider('usd', new DefinitionProvider()));
   context.subscriptions.push(vscode.languages.registerDocumentLinkProvider('usd', new DocumentLinkProvider()));
   context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider("usdc", new TextDocumentContentProvider()));
+  context.subscriptions.push(vscode.commands.registerCommand('usd.openAsUsda', openAsUsda));
+  context.subscriptions.push(vscode.window.registerCustomEditorProvider('usd.usdcViewer', new UsdcRedirectEditor()));
 }
 exports.activate = activate;
 
